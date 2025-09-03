@@ -7,6 +7,7 @@ import mz.gov.at.fiscalfileupload.entity.Utilizador;
 import mz.gov.at.fiscalfileupload.repository.FicheiroSubmetidoRepository;
 import mz.gov.at.fiscalfileupload.repository.LogSubmissaoRepository;
 import mz.gov.at.fiscalfileupload.repository.UtilizadorRepository;
+import mz.gov.at.fiscalfileupload.security.JwtUtil;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 
@@ -29,42 +30,71 @@ public class DownloadFicheiroController {
     private final FicheiroSubmetidoRepository ficheiroRepository;
     private final UtilizadorRepository utilizadorRepository;
     private final LogSubmissaoRepository logRepository;
+    private final JwtUtil jwtUtil;
 
     public DownloadFicheiroController(FicheiroSubmetidoRepository ficheiroRepository,
                                       UtilizadorRepository utilizadorRepository,
-                                      LogSubmissaoRepository logRepository) {
+                                      LogSubmissaoRepository logRepository, JwtUtil jwtUtil) {
         this.ficheiroRepository = ficheiroRepository;
         this.utilizadorRepository = utilizadorRepository;
         this.logRepository = logRepository;
+        this.jwtUtil = jwtUtil;
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<Resource> downloadFicheiro(@PathVariable Long id,
-                                                     @RequestParam("nuit") String nuit) throws IOException {
+                                                     @RequestHeader("Authorization") String authHeader) throws IOException {
 
-        // Buscar ficheiro
-        FicheiroSubmetido ficheiro = ficheiroRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Ficheiro não encontrado"));
+        System.out.println("=== DOWNLOAD DEBUG ===");
 
-        // Buscar utilizador
-        Utilizador utilizador = utilizadorRepository.findByNuit(nuit);
-        if (utilizador == null) {
+        // 1. Verifica se o header está presente
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            System.out.println("Header Authorization ausente ou inválido: " + authHeader);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
-        // Regras de acesso
+        String token = authHeader.replace("Bearer ", "");
+        System.out.println("Token recebido: " + token);
+
+        // 2. Extrai NUIT do token
+        String nuitDoToken;
+        try {
+            nuitDoToken = jwtUtil.extractNuit(token);
+            System.out.println("NUIT extraído do token: " + nuitDoToken);
+        } catch (Exception e) {
+            System.out.println("Erro ao extrair NUIT do token: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        // 3. Busca utilizador
+        Utilizador utilizador = utilizadorRepository.findByNuit(nuitDoToken);
+        if (utilizador == null) {
+            System.out.println("Utilizador não encontrado para NUIT: " + nuitDoToken);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        System.out.println("Perfil do utilizador: " + utilizador.getPerfil());
+
+        // 4. Busca ficheiro
+        FicheiroSubmetido ficheiro = ficheiroRepository.findById(id)
+                .orElse(null);
+
+        if (ficheiro == null) {
+            System.out.println("Ficheiro não encontrado para id: " + id);
+            return ResponseEntity.notFound().build();
+        }
+        System.out.println("Ficheiro solicitado: " + ficheiro.getNomeOriginal() + ", pertence ao NUIT: " + ficheiro.getUtilizador().getNuit());
+
+        // 5. Valida acesso
         if (utilizador.getPerfil() == Perfil.CONTRIBUINTE &&
                 !ficheiro.getUtilizador().getId().equals(utilizador.getId())) {
+            System.out.println("Acesso negado: contribuinte tentando baixar ficheiro de outro utilizador");
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
-        // Verificar se o ficheiro existe
         Path path = Paths.get(ficheiro.getCaminhoFicheiro());
-        if (!Files.exists(path)) {
-            return ResponseEntity.notFound().build();
-        }
-
+        if (!Files.exists(path)) return ResponseEntity.notFound().build();
         Resource resource = new UrlResource(path.toUri());
+        System.out.println("Download autorizado para " + ficheiro.getNomeOriginal());
 
         // Registar log de download
         LogSubmissao log = new LogSubmissao();

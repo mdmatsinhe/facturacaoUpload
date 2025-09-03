@@ -38,7 +38,7 @@ public class FicheiroUploadService {
         Files.createDirectories(pastaDestino);
 
         // Guardar ficheiro
-        Path destinoFinal = pastaDestino.resolve(file.getOriginalFilename());
+        Path destinoFinal = pastaDestino.resolve(file.getOriginalFilename()).normalize();
         Files.copy(file.getInputStream(), destinoFinal, StandardCopyOption.REPLACE_EXISTING);
 
         // Obter utilizador pelo NUIT

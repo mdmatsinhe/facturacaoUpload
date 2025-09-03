@@ -17,11 +17,6 @@ public class UtilizadorController {
         this.service = service;
     }
 
-    @PostMapping
-    public Utilizador criar(@RequestBody Utilizador utilizador) {
-        return service.salvar(utilizador);
-    }
-
     @GetMapping
     public List<Utilizador> listar() {
         return service.listarTodos();
